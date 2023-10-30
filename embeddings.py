@@ -61,7 +61,6 @@ def embedding_from_string(
     return embedding_cache[(string, model)]
 
 plot_embeddings = [embedding_from_string(plot, model="text-embedding-ada-002") for plot in movie_plots]
-print(len(plot_embeddings))
 
 data = movies[["Title", "Genre"]].to_dict("records")
 
@@ -71,31 +70,95 @@ data = movies[["Title", "Genre"]].to_dict("records")
 # )
 
 def print_recommendations_from_strings(
+    generated_movie_plot_embedding,
     strings,
-    index_of_source_string,
-    k_nearest_neighbors=3,
+    k_nearest_neighbors=4,
     model="text-embedding-ada-002"
 ):
     # Get all of the embeddings that we already have stored
     embeddings = [embedding_from_string(string) for string in strings]
     # Get embedding for our specific query string
-    query_embedding = embeddings[index_of_source_string]
+    # query_embedding = embeddings[index_of_source_string]
     # Get distances between our embedding and all other embeddings
-    distances = distances_from_embeddings(query_embedding, embeddings)
+    distances = distances_from_embeddings(generated_movie_plot_embedding, embeddings)
     # Get indices of the nearest neighbors
     indices_of_nearest_neighbors = indices_of_nearest_neighbors_from_distances(distances)
-    
-    query_string = strings[index_of_source_string]
+    print('what is indices of nearest neighbors? ', indices_of_nearest_neighbors)
+    # query_string = strings[index_of_source_string]
     match_count = 0
     for i in indices_of_nearest_neighbors:
-        if query_string == strings[i]:
+        if generated_movie_plot_embedding == strings[i]:
             continue
         if match_count >= k_nearest_neighbors:
             break
         match_count += 1
         print(f"Found {match_count} closest match: ")
         print(f"Distance of: {distances[i]}")
-        print(strings[i])
+        recommended_movie = movies.iloc[i]  # Using iloc to get the movie by row index
+        recommended_title = recommended_movie["Title"]
+        condensed_recommended_plot = condense_recommended_plot(strings[i])
+        summary = f"""
+           Move Title Recommendation: {recommended_title}
+           Movie Description: {condensed_recommended_plot}
+        """
+        print(summary)
 
+def generate_sample_movie_plot(user_input):
 
-print_recommendations_from_strings(movie_plots, 2)
+    if user_input:
+
+        PROMPT = """
+            You are a movie plot building tool.
+            A user might provide a summary of varying length to give you context into a movie plot that you should come up with. 
+            If no plot is recommended, you should just come up with a random movie plot on your own. 
+            We will take the movie plot that you come up with based on user input or at random and send it into a vector database to get nearest neighbors of the plot to provide movie recommendations
+            User input is: {user_input}.
+            Please only include the text of the plot and nothing else.
+            Please only keep the response to one paragraph.
+        """
+
+        messages = [
+            {
+                "role": "system",
+                "content": PROMPT
+            },
+            {
+                "role": "user",
+                "content": f"Write a prompt from the following description {user_input}"
+            }
+        ]
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=messages
+        )
+
+        return response["choices"][0]["message"]["content"]
+    else:
+        return None
+    
+def condense_recommended_plot(plot):
+    PROMPT = """
+            Your job is to take a provided movie plot and summarize the plot so that it can be readable to the user
+        """
+
+    messages = [
+        {
+            "role": "system",
+            "content": PROMPT
+        },
+        {
+            "role": "user",
+            "content": f"Please summarize the provided plot: {plot}"
+        }
+    ]
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=messages
+    )
+
+    return response["choices"][0]["message"]["content"]
+generated_movie_plot = generate_sample_movie_plot('we would like to watch a movie about a spaceship crew that is on a long voyage and ends up somehowe encountering violent alien life and needs to enforce every skill to survive but some of the crew doesnt make it')
+# generated_movie_plot = generate_sample_movie_plot('we want to watch a movie about a young boy who grows close with his childhood dog')
+if generated_movie_plot != None:
+    plot_embedding_from_generated_plot = get_embedding(generated_movie_plot)
+    print_recommendations_from_strings(plot_embedding_from_generated_plot, movie_plots, 2)
